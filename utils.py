@@ -152,10 +152,50 @@ async def summarize_with_openai_async(client: AsyncOpenAI, content: str, max_tok
 
 async def adjust_yaml_size_async(yaml_data: Dict[str, Any], client: AsyncOpenAI, max_chars: int = 10000) -> Dict[str, Any]:
     """
-    YAMLデータのサイズを非同期で制限する
+    YAMLデータのサイズを非同期で調整する
     """
     current_size = len(yaml.dump(yaml_data, allow_unicode=True))
     
+    # 文字数が少なすぎる場合（8000文字未満）は内容を拡充
+    if current_size < 8000:
+        adjusted_data = yaml_data.copy()
+        
+        # 各セクションのスライドの内容を拡充
+        for section in adjusted_data.get("sections", []):
+            for slide in section.get("slides", []):
+                # コンテンツの拡充
+                if "content" in slide and isinstance(slide["content"], list):
+                    content_text = "\n".join(slide["content"])
+                    expansion_prompt = f"""
+                    以下の内容をより詳細に展開してください：
+                    - 各ポイントに具体例を追加
+                    - 関連する補足情報を含める
+                    - 実践的な応用例を追加
+                    
+                    元の内容：
+                    {content_text}
+                    """
+                    expanded_content = await summarize_with_openai_async(client, expansion_prompt, 300)
+                    slide["content"] = [point.strip() for point in expanded_content.split("\n") if point.strip()]
+                
+                # 指導ポイントの拡充
+                if "teaching_points" in slide:
+                    points_text = slide["teaching_points"] if isinstance(slide["teaching_points"], str) else "\n".join(slide["teaching_points"])
+                    points_prompt = f"""
+                    以下の指導ポイントをより詳細に展開してください：
+                    - 具体的な指導方法を追加
+                    - 予想される質問や疑問点への対応
+                    - 実践的なアドバイスを含める
+                    
+                    元のポイント：
+                    {points_text}
+                    """
+                    expanded_points = await summarize_with_openai_async(client, points_prompt, 200)
+                    slide["teaching_points"] = [point.strip() for point in expanded_points.split("\n") if point.strip()]
+        
+        return adjusted_data
+    
+    # 文字数が多すぎる場合は既存の縮小ロジックを実行
     if current_size <= max_chars:
         return yaml_data
     
@@ -229,7 +269,6 @@ async def adjust_yaml_size_async(yaml_data: Dict[str, Any], client: AsyncOpenAI,
                                 "teaching_points": slide_data.get("teaching_points", "")
                             }
                         elif isinstance(slide_data, str):
-                            # 文字列の場合は、タイトルとして扱う
                             return {
                                 "number": str(index + 1),
                                 "title": slide_data,
@@ -237,7 +276,6 @@ async def adjust_yaml_size_async(yaml_data: Dict[str, Any], client: AsyncOpenAI,
                                 "teaching_points": ""
                             }
                         else:
-                            # その他の型の場合は、空のスライドを返す
                             return {
                                 "number": str(index + 1),
                                 "title": "スライド " + str(index + 1),
@@ -250,7 +288,6 @@ async def adjust_yaml_size_async(yaml_data: Dict[str, Any], client: AsyncOpenAI,
                         if "slides" in summarized_data:
                             slides_data = summarized_data["slides"]
                         else:
-                            # スライドキーがない場合は、辞書全体を1つのスライドとして扱う
                             slides_data = [summarized_data]
                     elif isinstance(summarized_data, list):
                         print("リスト型のデータを処理中...")
@@ -259,7 +296,6 @@ async def adjust_yaml_size_async(yaml_data: Dict[str, Any], client: AsyncOpenAI,
                         print("未知の型のデータを処理中...")
                         slides_data = [str(summarized_data)]
 
-                    # スライドデータを適切な形式に変換
                     section["slides"] = [create_slide_dict(slide, i) for i, slide in enumerate(slides_data)]
 
                 except Exception as e:
@@ -268,7 +304,6 @@ async def adjust_yaml_size_async(yaml_data: Dict[str, Any], client: AsyncOpenAI,
                     print(f"エラーの詳細: {str(e)}")
                     print(f"summarized_slides の内容: {summarized_slides}")
                     print(f"現在の section の内容: {section}")
-                    # 元のスライドを使用
                     section["slides"] = [
                         {
                             "number": str(i+1),
