@@ -131,7 +131,7 @@ async def analyze_content_part(client: AsyncOpenAI, part: str, part_num: int, to
         print(f"パート {part_num+1} の処理中にエラー: {str(e)}")
         raise
 
-async def summarize_with_openai_async(client: AsyncOpenAI, content: str, max_tokens: int = 100) -> str:
+async def summarize_with_openai_async(client: AsyncOpenAI, content: str, max_tokens: int = 10000000) -> str:
     """
     OpenAI APIを使用してコンテンツを非同期で要約する
     """
@@ -139,10 +139,10 @@ async def summarize_with_openai_async(client: AsyncOpenAI, content: str, max_tok
         response = await client.chat.completions.create(
             model="gpt-4.1-2025-04-14",
             messages=[
-                {"role": "system", "content": "与えられたテキストを自然な形で要約してください。重要なポイントを保持しながら、簡潔に表現してください。"},
-                {"role": "user", "content": f"以下のテキストを{max_tokens}トークン程度に要約してください：\n\n{content}"}
+                {"role": "system", "content": "与えられたテキストを自然な形で要約してください。重要なポイントを保持しながら、箇条書きの場合は文章を途中で切らないように注意してください。"},
+                {"role": "user", "content": f"以下のテキストを要約してください。箇条書きの場合は、各項目が完結するように要約してください：\n\n{content}"}
             ],
-            max_tokens=max_tokens,
+            max_tokens=10000000,  # 10M tokens
             temperature=0.7
         )
         return response.choices[0].message.content.strip()
@@ -175,7 +175,7 @@ async def adjust_yaml_size_async(yaml_data: Dict[str, Any], client: AsyncOpenAI,
                     元の内容：
                     {content_text}
                     """
-                    expanded_content = await summarize_with_openai_async(client, expansion_prompt, 300)
+                    expanded_content = await summarize_with_openai_async(client, expansion_prompt, 10000000)
                     slide["content"] = [point.strip() for point in expanded_content.split("\n") if point.strip()]
                 
                 # 指導ポイントの拡充
@@ -190,7 +190,7 @@ async def adjust_yaml_size_async(yaml_data: Dict[str, Any], client: AsyncOpenAI,
                     元のポイント：
                     {points_text}
                     """
-                    expanded_points = await summarize_with_openai_async(client, points_prompt, 200)
+                    expanded_points = await summarize_with_openai_async(client, points_prompt, 10000000)
                     slide["teaching_points"] = [point.strip() for point in expanded_points.split("\n") if point.strip()]
         
         return adjusted_data
@@ -209,26 +209,31 @@ async def adjust_yaml_size_async(yaml_data: Dict[str, Any], client: AsyncOpenAI,
         for slide in section.get("slides", []):
             if "content" in slide:
                 if isinstance(slide["content"], list):
-                    combined_content = "\n".join(slide["content"])
-                    tasks.append(("content", slide, await summarize_with_openai_async(client, combined_content, 150)))
-                    
+                    # 箇条書きの場合は、各項目を個別に処理
                     if len(slide["content"]) > 5:
                         combined_points = "\n".join(slide["content"])
                         tasks.append(("content_limit", slide, await summarize_with_openai_async(client, 
-                            f"以下の内容を5つの重要なポイントにまとめてください：\n{combined_points}", 200)))
+                            f"以下の内容を5つの重要なポイントにまとめてください。各ポイントは完結した文章にしてください：\n{combined_points}", 10000000)))
+                    else:
+                        # 5項目以下の場合は、各項目を個別に要約
+                        new_content = []
+                        for item in slide["content"]:
+                            summarized_item = await summarize_with_openai_async(client, item, 10000000)
+                            new_content.append(summarized_item)
+                        tasks.append(("content", slide, new_content))
                 else:
-                    tasks.append(("content", slide, await summarize_with_openai_async(client, str(slide["content"]), 100)))
+                    tasks.append(("content", slide, await summarize_with_openai_async(client, str(slide["content"]), 10000000)))
             
             if "teaching_points" in slide:
-                tasks.append(("teaching_points", slide, await summarize_with_openai_async(client, str(slide["teaching_points"]), 200)))
+                tasks.append(("teaching_points", slide, await summarize_with_openai_async(client, str(slide["teaching_points"]), 10000000)))
     
     # 並列処理の結果を適用
     for task_type, slide, result in tasks:
         if task_type == "content":
-            if isinstance(slide["content"], list):
-                slide["content"] = [point.strip() for point in result.split("\n") if point.strip()]
-            else:
+            if isinstance(result, list):
                 slide["content"] = result
+            else:
+                slide["content"] = [point.strip() for point in result.split("\n") if point.strip()]
         elif task_type == "content_limit":
             slide["content"] = [point.strip() for point in result.split("\n") if point.strip()][:5]
         elif task_type == "teaching_points":
@@ -249,7 +254,7 @@ async def adjust_yaml_size_async(yaml_data: Dict[str, Any], client: AsyncOpenAI,
                 各スライドには以下の情報を含めてください：
                 - タイトル
                 - 内容（箇条書き）
-                - 教授内容
+                - 講義台本
                 
                 元のスライド内容：
                 {combined_slides}
