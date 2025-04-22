@@ -65,7 +65,7 @@ def create_zip_file(yaml_files: List[Dict[str, Any]], base_filename: str) -> tup
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         for i, yaml_data in enumerate(yaml_files, 1):
             # 個別のYAMLファイル名を生成
-            yaml_filename = f"{base_filename}_{i}.yaml"
+            yaml_filename = f"{base_filename}_{i}.txt"
             # YAMLデータを文字列に変換
             yaml_content = format_yaml_for_preview(yaml_data)
             # ZIPファイルに追加
@@ -230,12 +230,12 @@ def main():
                         st.code(preview_text, language="yaml")
                     
                     # 個別ダウンロードボタン
-                    filename = f"{base_filename}_{i+1}.yaml"
+                    filename = f"{base_filename}_{i+1}.txt"
                     st.download_button(
-                        label=f"このYAMLファイルをダウンロード",
+                        label=f"このファイルをダウンロード",
                         data=preview_text,
                         file_name=filename,
-                        mime="text/yaml"
+                        mime="text/plain"
                     )
 
 if __name__ == "__main__":
